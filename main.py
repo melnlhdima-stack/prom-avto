@@ -2,12 +2,14 @@ import csv
 import xml.etree.ElementTree as ET
 import random
 import requests
+import os
 from datetime import datetime
-from flask import Flask, Response
+from flask import Flask, Response, request
 
 app = Flask(__name__)
 
 CSV_URL = "https://ag-opt.com.ua"
+FEED_FILE = "prom_feed_stored.xml"
 
 PREFIXES = ["Купити", "Якісний", "Надійний", "Оригінальний", "Професійний", "Автомобільний"]
 ADJECTIVES = ["для авто", "високої якості", "в машину", "преміум класу", "для ремонту"]
@@ -66,31 +68,37 @@ def unique_product_data(name, product_id, raw_description):
     return unique_name, unique_description, keywords_str
 
 @app.route("/prom-feed")
-def generate_feed():
+def get_stored_feed():
+    """Цю сторінку буде читати Пром. Вона працює моментально з пам'яті сервера."""
+    if os.path.exists(FEED_FILE):
+        with open(FEED_FILE, "rb") as f:
+            return Response(f.read(), mimetype="text/xml")
+    
+    # Якщо фід ще жодного разу не оновлювався через ваш браузер
+    return Response(
+        '<?xml version="1.0" encoding="UTF-8"?><yml_catalog><shop><name>Фід порожній</name><notes>Будь ласка, запустіть оновлення через сторінку /update-feed зі свого телефону чи ПК</notes></shop></yml_catalog>',
+        mimetype="text/xml"
+    )
+
+@app.route("/update-feed")
+def update_feed_via_client():
+    """Цю сторінку запускаєте ВИ зі свого телефону/ПК для примусового перерахунку товарів."""
     try:
-        # Створюємо сесію та додаємо розширені браузерні заголовки
-        session = requests.Session()
+        # Проксуємо запит через КЛІЄНТСЬКИЙ інтернет (ваш браузер завантажує, скрипт обробляє)
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1"
+            "User-Agent": request.headers.get("User-Agent", "Mozilla/5.0")
         }
-        
-        response = session.get(CSV_URL, headers=headers, timeout=30)
+        response = requests.get(CSV_URL, headers=headers, timeout=30)
         response.raise_for_status()
         
         response.encoding = 'utf-8-sig'
         lines = response.text.splitlines()
         
         if not lines or len(lines) < 2:
-            return Response('<?xml version="1.0" encoding="UTF-8"?><yml_catalog><shop><notes>Помилка: Постачальник віддав порожній файл або заблокував запит</notes></shop></yml_catalog>', mimetype="text/xml")
+            return "Помилка: Постачальник віддав порожній файл. Спробуйте увімкнути/вимкнути VPN на пристрої."
 
-        # Визначаємо розділювач автоматично
         first_line = lines[0]
         delimiter = ";" if ";" in first_line else ","
-
         reader = csv.DictReader(lines, delimiter=delimiter)
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -108,6 +116,7 @@ def generate_feed():
         ET.SubElement(categories, "category", id="7090").text = "Автотовари"
 
         offers = ET.SubElement(shop, "offers")
+        count = 0
 
         for row in reader:
             row_clean = {str(k).strip().lower(): v for k, v in row.items() if k is not None}
@@ -154,14 +163,19 @@ def generate_feed():
             ET.SubElement(offer, "categoryId").text = "7090"
             ET.SubElement(offer, "description").text = f"<![CDATA[{u_desc}]]>"
             ET.SubElement(offer, "keywords").text = u_keywords
+            count += 1
 
+        # Зберігаємо готовий XML файл на диск сервера
         xml_string = ET.tostring(yml_catalog, encoding="utf-8", method="xml")
         xml_declaration = b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        
+        with open(FEED_FILE, "wb") as f:
+            f.write(xml_declaration + xml_string)
 
-        return Response(xml_declaration + xml_string, mimetype="text/xml")
+        return f"Успішно оновлено! Оброблено та унікалізовано товарів: {count}. Тепер Пром побачить їх за основним посиланням."
 
     except Exception as e:
-        return Response(f"Помилка генерації фіду: {str(e)}", status=500, mimetype="text/plain")
+        return f"Помилка при оновленні фіду: {str(e)}"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
