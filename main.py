@@ -1,5 +1,3 @@
-import csv
-import io
 import requests
 from flask import Flask
 
@@ -18,20 +16,12 @@ def prom_feed():
         except UnicodeDecodeError:
             text_content = res.content.decode('cp1251')
             
-        csv_data = csv.DictReader(io.StringIO(text_content))
-        fieldnames = csv_data.fieldnames if csv_data.fieldnames else []
+        # Беремо перші 1000 символів файлу, щоб побачити його структуру
+        raw_sample = text_content[:1000]
         
-        # Показываем первые 2 строки для проверки данных
-        sample_rows = []
-        for i, row in enumerate(csv_data):
-            if i < 2:
-                sample_rows.append(str(dict(row)))
-            else:
-                break
-                
-        return f"<h1>Названия колонок у поставщика:</h1><p>{', '.join(fieldnames)}</p><h2>Пример товара:</h2><p>{'<br><br>'.join(sample_rows)}</p>"
+        return f"<h1>Сирий початок файлу постачальника:</h1><pre>{raw_sample}</pre>"
     except Exception as e:
-        return f"Ошибка: {str(e)}", 500
+        return f"Помилка: {str(e)}", 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
