@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 CSV_URL = "https://ag-opt.com.ua"
 
-# Словар для унікалізації назв та пошукових слів
+# Словники для автоматичної унікалізації назв
 PREFIXES = ["Купити", "Якісний", "Надійний", "Оригінальний", "Професійний", "Автомобільний"]
 ADJECTIVES = ["для авто", "високої якості", "в машину", "преміум класу", "для ремонту"]
 
@@ -28,26 +28,23 @@ def calculate_margin(price_opt):
     else: return 0.15
 
 def unique_product_data(name, product_id, raw_description):
-    """Генерація унікальних назв, описів та тегів для Prom."""
-    # Очищення базової назви
+    """Генерація унікальних назв, описів та тегів пошуку."""
     clean_name = name.strip()
     
-    # 1. Унікалізація назви
+    # 1. Створення унікального тайтлу
     prefix = random.choice(PREFIXES)
     adj = random.choice(ADJECTIVES)
-    # Зразок: "Надійний Фільтр масляний для авто (Арт. 12345)"
     unique_name = f"{prefix} {clean_name} {adj} (Арт. {product_id})"
     
-    # 2. Автоматична генерація ключових слів для пошуку на Prom
+    # 2. Ключові слова для пошуку всередині Prom
     words = [w.lower().strip(",.?!()\"") for w in clean_name.split() if len(w) > 3]
     base_keywords = [clean_name.lower(), "автотовари", "запчастини", "аксесуари для авто"]
     base_keywords.extend(words)
-    # Залишаємо унікальні ключові слова через кому
     keywords_str = ", ".join(list(dict.fromkeys(base_keywords))[:15])
     
-    # 3. Перефразування опису за допомогою рандомізованих блоків
+    # 3. Нова структура опису (рандомізована)
     intro_options = [
-        "Пропонуємо вашій увазі високоякісну позицію для вашого автомобіля.",
+        "Пропонуємо вашій увазі якісну позицію для вашого автомобіля.",
         "Оригінальна деталь та аксесуари, що забезпечать надійну роботу авто.",
         "Сучасне рішення для обслуговування транспортного засобу від перевіреного бренду."
     ]
@@ -64,7 +61,7 @@ def unique_product_data(name, product_id, raw_description):
     
     clean_desc = raw_description.replace("<p>", "").replace("</p>", "").replace("<strong>", "").replace("</strong>", "").strip()
     if not clean_desc or len(clean_desc) < 10:
-        clean_desc = f"Товар {clean_name} для обслуговування та покращення авто."
+        clean_desc = f"Товар {clean_name} призначений для якісного обслуговування та покращення вашого авто."
 
     unique_description = (
         f"<p><strong>{unique_name}</strong> — "
@@ -79,14 +76,16 @@ def unique_product_data(name, product_id, raw_description):
 @app.route("/prom-feed")
 def generate_feed():
     try:
+        # Завантажуємо файл постачальника
         response = requests.get(CSV_URL, timeout=30)
         response.raise_for_status()
         
-        # Виправлення можливих проблем із кодуванням файлу постачальника
-        response.encoding = 'utf-8'
+        # Обробка кодування (зокрема UTF-8 з невидимими символами BOM)
+        response.encoding = 'utf-8-sig'
         lines = response.text.splitlines()
         reader = csv.DictReader(lines, delimiter=";")
 
+        # Створення XML структури
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
         yml_catalog = ET.Element("yml_catalog", date=current_time)
         shop = ET.SubElement(yml_catalog, "shop")
@@ -104,40 +103,57 @@ def generate_feed():
         offers = ET.SubElement(shop, "offers")
 
         for row in reader:
-            # Читання ID та захист від зсуву колонок
-            product_id = row.get("id") or row.get("ID") or row.get("\ufeffid")
+            # Очищення ключів рядка від пробілів для точного пошуку колонок
+            row_clean = {str(k).strip().lower(): v for k, v in row.items() if k is not None}
+
+            # Розумний пошук ID колонки
+            product_id = (
+                row_clean.get("id") or 
+                row_clean.get("id товара") or 
+                row_clean.get("код") or 
+                row_clean.get("артикул") or 
+                row_clean.get("код_товара")
+            )
             if not product_id:
                 continue
 
+            # Розумний пошук ціни
+            raw_price = (
+                row_clean.get("price") or 
+                row_clean.get("цена") or 
+                row_clean.get("ціна") or 
+                "0"
+            )
             try:
-                raw_price = row.get("price") or row.get("Price") or "0"
-                price_opt = float(raw_price.replace(",", ".").strip())
+                price_opt = float(str(raw_price).replace(",", ".").strip())
             except ValueError:
                 price_opt = 0.0
 
             if price_opt <= 0:
                 continue
 
+            # Обчислення нової ціни з унікальною націнкою
             margin_percent = calculate_margin(price_opt)
             price_retail = round(price_opt * (1 + margin_percent), 2)
 
-            avail_status = row.get("available") or row.get("Available") or "true"
-            is_available = "true" if avail_status.lower() in ["true", "1", "yes", "в наявності"] else "false"
+            # Визначення статусу наявності
+            raw_avail = row_clean.get("available") or row_clean.get("наличие") or row_clean.get("наявність") or "true"
+            is_available = "true" if str(raw_avail).lower() in ["true", "1", "yes", "в наявності", "есть", "в наличии"] else "false"
 
-            raw_name = row.get("name") or row.get("Name") or "Автотовар"
-            raw_desc = row.get("description") or row.get("Description") or ""
+            # Пошук назви та опису
+            raw_name = row_clean.get("name") or row_clean.get("название") or row_clean.get("найменування") or row_clean.get("назва") or "Автотовар"
+            raw_desc = row_clean.get("description") or row_clean.get("описание") or row_clean.get("опис") or ""
 
-            # Запуск модуля унікалізації контенту
+            # Унікалізація
             u_name, u_desc, u_keywords = unique_product_data(raw_name, product_id, raw_desc)
 
+            # Запис у фід
             offer = ET.SubElement(offers, "offer", id=str(product_id), available=is_available)
             ET.SubElement(offer, "name").text = u_name
             ET.SubElement(offer, "price").text = str(price_retail)
             ET.SubElement(offer, "currencyId").text = "UAH"
             ET.SubElement(offer, "categoryId").text = "7090"
             ET.SubElement(offer, "description").text = f"<![CDATA[{u_desc}]]>"
-            
-            # Додаємо ключові слова спеціально для пошукових алгоритмів Prom
             ET.SubElement(offer, "keywords").text = u_keywords
 
         xml_string = ET.tostring(yml_catalog, encoding="utf-8", method="xml")
@@ -146,7 +162,7 @@ def generate_feed():
         return Response(xml_declaration + xml_string, mimetype="text/xml")
 
     except Exception as e:
-        return Response(f"Помилка генерації: {str(e)}", status=500, mimetype="text/plain")
+        return Response(f"Помилка генерації фіду: {str(e)}", status=500, mimetype="text/plain")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
