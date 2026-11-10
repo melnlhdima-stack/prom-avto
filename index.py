@@ -2,17 +2,15 @@ import csv
 import xml.etree.ElementTree as ET
 import random
 import requests
-import os
 from datetime import datetime
-from flask import Flask, Response, request
+from flask import Flask, Response
 
 app = Flask(__name__)
 
 # Посилання на CSV-файл вашого постачальника
 CSV_URL = "https://ag-opt.com.ua"
-FEED_FILE = "prom_feed_stored.xml"
 
-# Словар для унікалізації назв та текстів
+# Набори слів для автоматичної унікалізації назв і текстів
 PREFIXES = ["Купити", "Якісний", "Надійний", "Оригінальний", "Професійний", "Автомобільний"]
 ADJECTIVES = ["для авто", "високої якості", "в машину", "преміум класу", "для ремонту"]
 
@@ -45,7 +43,7 @@ def unique_product_data(name, product_id, raw_description):
     base_keywords.extend(words)
     keywords_str = ", ".join(list(dict.fromkeys(base_keywords))[:15])
     
-    # 3. Нова структура опису (рандомізована)
+    # 3. Структурована рандомізована модель опису
     intro_options = [
         "Пропонуємо вашій увазі якісну позицію для вашого автомобіля.",
         "Оригінальна деталь та аксесуари, що забезпечать надійну роботу авто.",
@@ -76,24 +74,13 @@ def unique_product_data(name, product_id, raw_description):
     
     return unique_name, unique_description, keywords_str
 
-@app.route("/prom-feed")
-def get_stored_feed():
-    """Сторінка віддає збережений фід для Prom.ua миттєво."""
-    if os.path.exists(FEED_FILE):
-        with open(FEED_FILE, "rb") as f:
-            return Response(f.read(), mimetype="text/xml")
-    
-    return Response(
-        '<?xml version="1.0" encoding="UTF-8"?><yml_catalog><shop><name>Фід порожній</name><notes>Будь ласка, запустіть оновлення через сторінку /update-feed зі свого телефону чи ПК</notes></shop></yml_catalog>',
-        mimetype="text/xml"
-    )
-
-@app.route("/update-feed")
-def update_feed_via_client():
-    """Сторінка для примусового оновлення прайсу через ваш пристрій."""
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def generate_feed(path):
     try:
+        # Емуляція браузера Chrome для обходу блокувань постачальника
         headers = {
-            "User-Agent": request.headers.get("User-Agent", "Mozilla/5.0")
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         response = requests.get(CSV_URL, headers=headers, timeout=30)
         response.raise_for_status()
@@ -101,20 +88,17 @@ def update_feed_via_client():
         response.encoding = 'utf-8-sig'
         lines = response.text.splitlines()
         
-        if not lines or len(lines) < 2:
-            return "Помилка: файл постачальника порожній."
+        if not lines:
+            return Response("Помилка: Файл постачальника порожній", status=400, mimetype="text/plain")
 
-        # Визначаємо розділювач автоматично за першим рядком
-        first_line = lines[0]
-        delimiter = ";" if ";" in first_line else ","
-        
-        # Читаємо як звичайний масив рядків без прив'язки до назв колонок
+        # Автоматичне визначення розділювача за першим рядком
+        delimiter = ";" if ";" in lines[0] else ","
         reader = csv.reader(lines, delimiter=delimiter)
         
-        # Пропускаємо перший рядок із заголовками
-        headers_row = next(reader)
+        # Пропускаємо перший рядок із заголовками колонок
+        next(reader, None)
 
-        # Створення XML структури
+        # Базовий каркас XML каталогу
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
         yml_catalog = ET.Element("yml_catalog", date=current_time)
         shop = ET.SubElement(yml_catalog, "shop")
@@ -130,38 +114,36 @@ def update_feed_via_client():
         ET.SubElement(categories, "category", id="7090").text = "Автотовари"
 
         offers = ET.SubElement(shop, "offers")
-        count = 0
 
         for row in reader:
             if not row or len(row) < 3:
-                continue  # Пропускаємо порожні або пошкоджені рядки
-
-            # Зчитуємо дані за індексами колонок (0 - перша, 1 - друга, 2 - третя і т.д.)
-            product_id = row[0].strip()
-            if not product_id:
                 continue
 
-            # Спроба дістати назву та опис (якщо колонок менше, підставляємо дефолт)
+            # Читання даних за порядковими номерами колонок (0 - ID, 1 - назва, 2 - ціна, 3 - опис)
+            product_id = row[0].strip()
             raw_name = row[1].strip() if len(row) > 1 else "Автотовар"
             raw_price = row[2].strip() if len(row) > 2 else "0"
             raw_desc = row[3].strip() if len(row) > 3 else ""
 
+            if not product_id:
+                continue
+
             try:
-                price_opt = float(str(raw_price).replace(",", ".").strip())
+                price_opt = float(raw_price.replace(",", ".").strip())
             except ValueError:
                 price_opt = 0.0
 
             if price_opt <= 0:
                 continue
 
-            # Розрахунок ціни за вашою сіткою
+            # Обчислення ціни з вашою націнкою
             margin_percent = calculate_margin(price_opt)
             price_retail = round(price_opt * (1 + margin_percent), 2)
 
-            # Автоматична унікалізація контенту
+            # Генерація унікальних даних
             u_name, u_desc, u_keywords = unique_product_data(raw_name, product_id, raw_desc)
 
-            # Запис у XML
+            # Формування елемента товару
             offer = ET.SubElement(offers, "offer", id=str(product_id), available="true")
             ET.SubElement(offer, "name").text = u_name
             ET.SubElement(offer, "price").text = str(price_retail)
@@ -169,23 +151,11 @@ def update_feed_via_client():
             ET.SubElement(offer, "categoryId").text = "7090"
             ET.SubElement(offer, "description").text = f"<![CDATA[{u_desc}]]>"
             ET.SubElement(offer, "keywords").text = u_keywords
-            count += 1
 
-        # Якщо жодного товару не додалося, виведемо заголовки для діагностики
-        if count == 0:
-            return f"Помилка: Товари не знайдено. Заголовки файлу постачальника: {headers_row}"
-
-        # Зберігаємо готовий XML-фід на диск сервера Render
         xml_string = ET.tostring(yml_catalog, encoding="utf-8", method="xml")
         xml_declaration = b'<?xml version="1.0" encoding="UTF-8"?>\n'
-        
-        with open(FEED_FILE, "wb") as f:
-            f.write(xml_declaration + xml_string)
 
-        return f"Успішно оновлено! Оброблено та унікалізовано товарів: {count}. Тепер Пром побачить їх за основним посиланням."
+        return Response(xml_declaration + xml_string, mimetype="text/xml")
 
     except Exception as e:
-        return f"Помилка при генерації: {str(e)}"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+        return Response(f"Помилка сервера: {str(e)}", status=500, mimetype="text/plain")
