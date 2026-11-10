@@ -7,7 +7,7 @@ from flask import Flask, Response
 
 app = Flask(__name__)
 
-# Посилання на CSV-файл вашого постачальника
+# ПОВНЕ ПОСИЛАННЯ З ВАШИМИ ТОКЕНАМИ ТА КЛЮЧАМИ
 CSV_URL = "https://ag-opt.com.ua"
 
 # Набори слів для автоматичної унікалізації назв і текстів
@@ -39,11 +39,11 @@ def unique_product_data(name, product_id, raw_description):
     
     # 2. Ключові слова для пошуку всередині Prom
     words = [w.lower().strip(",.?!()\"") for w in clean_name.split() if len(w) > 3]
-    base_keywords = [clean_name.lower(), "автотовари", "запчастини", "аксесуари для авто"]
+    base_keywords = [clean_name.lower(), "автотовари", "запчастини", "аксесуари для auto"]
     base_keywords.extend(words)
     keywords_str = ", ".join(list(dict.fromkeys(base_keywords))[:15])
     
-    # 3. Структурована рандомізована модель опису
+    # 3. Рандомізована модель опису товару
     intro_options = [
         "Пропонуємо вашій увазі якісну позицію для вашого автомобіля.",
         "Оригінальна деталь та аксесуари, що забезпечать надійну роботу авто.",
