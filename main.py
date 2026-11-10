@@ -10,6 +10,8 @@ CSV_URL = "https://ag-opt.com.ua"
 
 def calculate_markup(base_price):
     try:
+        # Очищаємо ціну від можливих пробілів та замін
+        base_price = base_price.replace(',', '.').strip()
         price = float(base_price)
     except (ValueError, TypeError):
         return "0"
@@ -43,16 +45,42 @@ def calculate_markup(base_price):
 def prom_feed():
     try:
         res = requests.get(CSV_URL, timeout=30)
-        res.encoding = 'utf-8'
         if res.status_code != 200:
             return "Помилка завантаження даних", 500
             
-        csv_data = csv.DictReader(io.StringIO(res.text))
+        # Автоматично визначаємо кодування або пробуємо два найпопулярніших
+        text_content = ""
+        try:
+            text_content = res.content.decode('utf-8')
+        except UnicodeDecodeError:
+            text_content = res.content.decode('cp1251')
+            
+        csv_data = csv.DictReader(io.StringIO(text_content))
+        
+        # Перевіряємо реальні назви колонок, які прийшли від постачальника
+        fieldnames = csv_data.fieldnames if csv_data.fieldnames else []
+        
+        # Функція для гнучкого пошуку потрібної колонки
+        def find_col(possible_names):
+            for name in possible_names:
+                for field in fieldnames:
+                    if field.lower().strip() == name.lower().strip():
+                        return field
+            return None
+
+        # Шукаємо відповідності колонок у постачальника AvtoGrand
+        art_col = find_col(['Артикул', 'article', 'sku', 'id', 'код'])
+        name_col = find_col(['Назва', 'name', 'title', 'товар'])
+        price_col = find_col(['Ціна', 'price', 'cost', 'цена'])
+        amount_col = find_col(['Кількість', 'quantity', 'amount', 'ostatok', 'кол-во', 'склад'])
+        cat_col = find_col(['Категорія', 'category', 'группа', 'група'])
+        img_col = find_col(['Фото', 'image', 'picture', 'photo', 'ссылка на фото'])
+
         yml = ET.Element("yml_catalog", date="2026-11-10 12:00")
         shop = ET.SubElement(yml, "shop")
         
-        ET.SubElement(shop, "name").text = "Магазин"
-        ET.SubElement(shop, "company").text = "Компанія"
+        ET.SubElement(shop, "name").text = "Автомагазин"
+        ET.SubElement(shop, "company").text = "Дропшипінг"
         ET.SubElement(shop, "url").text = "https://prom.ua"
         
         currencies = ET.SubElement(shop, "currencies")
@@ -63,14 +91,15 @@ def prom_feed():
         added_cats = set()
 
         for row in csv_data:
-            articul = row.get('Артикул', row.get('article', ''))
-            name = row.get('Назва', row.get('name', ''))
-            price_raw = row.get('Ціна', row.get('price', '0'))
-            amount = row.get('Кількість', row.get('quantity', '0'))
-            cat_name = row.get('Категорія', row.get('category', 'Автотовари'))
-            img = row.get('Фото', row.get('image', ''))
+            # Зчитуємо дані через визначені розумні колонки
+            articul = row.get(art_col, '').strip() if art_col else ''
+            name = row.get(name_col, '').strip() if name_col else ''
+            price_raw = row.get(price_col, '0').strip() if price_col else '0'
+            amount_raw = row.get(amount_col, '0').strip() if amount_col else '0'
+            cat_name = row.get(cat_col, 'Автотовари').strip() if cat_col else 'Автотовари'
+            img = row.get(img_col, '').strip() if img_col else ''
             
-            if not articul:
+            if not articul or not name:
                 continue
                 
             prom_price = calculate_markup(price_raw)
@@ -79,7 +108,13 @@ def prom_feed():
                 ET.SubElement(categories, "category", id=cat_id).text = cat_name
                 added_cats.add(cat_id)
             
-            avail = "true" if int(amount) > 0 else "false"
+            # Перевіряємо кількість безпомилково
+            try:
+                avail_bool = int(amount_raw) > 0
+            except:
+                avail_bool = True if amount_raw and amount_raw.lower() not in ['0', 'нет', 'немає'] else False
+                
+            avail = "true" if avail_bool else "false"
             offer = ET.SubElement(offers, "offer", id=articul, available=avail)
             
             ET.SubElement(offer, "name").text = f"{name} (Арт. {articul})"
@@ -89,7 +124,7 @@ def prom_feed():
             if img:
                 ET.SubElement(offer, "picture").text = img
                 
-            desc = f"<p><strong>Якісні автотовари!</strong> {name}. Артикул: {articul}. Доставка по Україні.</p>"
+            desc = f"<p><strong>Якісні автотовари!</strong> {name}. Артикул для замовлення: {articul}. Доставка по Україні.</p>"
             ET.SubElement(offer, "description").text = desc
 
         return Response(ET.tostring(yml, encoding="utf-8"), mimetype="application/xml")
@@ -98,3 +133,4 @@ def prom_feed():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
