@@ -7,9 +7,10 @@ from flask import Flask, Response
 
 app = Flask(__name__)
 
+# Посилання на CSV-файл вашого постачальника
 CSV_URL = "https://ag-opt.com.ua"
 
-# Словники для автоматичної унікалізації назв
+# Набори слів для автоматичної унікалізації назв і текстів
 PREFIXES = ["Купити", "Якісний", "Надійний", "Оригінальний", "Професійний", "Автомобільний"]
 ADJECTIVES = ["для авто", "високої якості", "в машину", "преміум класу", "для ремонту"]
 
@@ -42,7 +43,7 @@ def unique_product_data(name, product_id, raw_description):
     base_keywords.extend(words)
     keywords_str = ", ".join(list(dict.fromkeys(base_keywords))[:15])
     
-    # 3. Нова структура опису (рандомізована)
+    # 3. Структурована рандомізована модель опису
     intro_options = [
         "Пропонуємо вашій увазі якісну позицію для вашого автомобіля.",
         "Оригінальна деталь та аксесуари, що забезпечать надійну роботу авто.",
@@ -50,7 +51,7 @@ def unique_product_data(name, product_id, raw_description):
     ]
     benefit_options = [
         "Виріб виготовлено з міцних матеріалів, стійких до зносу.",
-        "Відповідає всім заводським стандартам якості та технічним вимогам.",
+        "Відповідає всім заводским стандартам якості та технічним вимогам.",
         "Легко встановлюється та має тривалий термін експлуатації."
     ]
     delivery_options = [
@@ -59,7 +60,7 @@ def unique_product_data(name, product_id, raw_description):
         "Надійне пакування перед відправленням для безпечного транспортування."
     ]
     
-    clean_desc = raw_description.replace("<p>", "").replace("</p>", "").replace("<strong>", "").replace("</strong>", "").strip()
+    clean_desc = raw_description.replace("<p>", "").replace("</p>", "").replace("<strong >", "").replace("<strong>", "").replace("</strong>", "").strip()
     if not clean_desc or len(clean_desc) < 10:
         clean_desc = f"Товар {clean_name} призначений для якісного обслуговування та покращення вашого авто."
 
@@ -85,7 +86,7 @@ def generate_feed():
         lines = response.text.splitlines()
         reader = csv.DictReader(lines, delimiter=";")
 
-        # Створення XML структури
+        # Створення головної XML структури
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
         yml_catalog = ET.Element("yml_catalog", date=current_time)
         shop = ET.SubElement(yml_catalog, "shop")
@@ -103,7 +104,7 @@ def generate_feed():
         offers = ET.SubElement(shop, "offers")
 
         for row in reader:
-            # Очищення ключів рядка від пробілів для точного пошуку колонок
+            # Очищення ключів рядка від пробілів та приведення до нижнього регістру
             row_clean = {str(k).strip().lower(): v for k, v in row.items() if k is not None}
 
             # Розумний пошук ID колонки
@@ -144,10 +145,10 @@ def generate_feed():
             raw_name = row_clean.get("name") or row_clean.get("название") or row_clean.get("найменування") or row_clean.get("назва") or "Автотовар"
             raw_desc = row_clean.get("description") or row_clean.get("описание") or row_clean.get("опис") or ""
 
-            # Унікалізація
+            # Унікалізація даних
             u_name, u_desc, u_keywords = unique_product_data(raw_name, product_id, raw_desc)
 
-            # Запис у фід
+            # Запис товару в дерево XML
             offer = ET.SubElement(offers, "offer", id=str(product_id), available=is_available)
             ET.SubElement(offer, "name").text = u_name
             ET.SubElement(offer, "price").text = str(price_retail)
@@ -163,6 +164,21 @@ def generate_feed():
 
     except Exception as e:
         return Response(f"Помилка генерації фіду: {str(e)}", status=500, mimetype="text/plain")
+
+
+# --- Тестовий діагностичний роут для аналізу структури CSV ---
+@app.route("/debug-csv")
+def debug_csv():
+    try:
+        res = requests.get(CSV_URL, timeout=30)
+        res.encoding = 'utf-8-sig'
+        lines = res.text.splitlines()
+        # Повертає перші 4 рядки прайсу постачальника як простий текст
+        sample = "\n".join(lines[:4])
+        return Response(sample, mimetype="text/plain")
+    except Exception as e:
+        return Response(f"Помилка завантаження CSV: {str(e)}", status=500, mimetype="text/plain")
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
