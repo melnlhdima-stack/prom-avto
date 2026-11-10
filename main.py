@@ -26,7 +26,7 @@ def calculate_margin(price_opt):
     else: return 0.15
 
 def unique_product_data(name, product_id, raw_description):
-    clean_name = str(name).strip()
+    clean_name = name.strip()
     prefix = random.choice(PREFIXES)
     adj = random.choice(ADJECTIVES)
     unique_name = f"{prefix} {clean_name} {adj} (Арт. {product_id})"
@@ -36,67 +36,56 @@ def unique_product_data(name, product_id, raw_description):
     base_keywords.extend(words)
     keywords_str = ", ".join(list(dict.fromkeys(base_keywords))[:15])
     
-    intro = random.choice([
+    intro_options = [
         "Пропонуємо вашій увазі якісну позицію для вашого автомобіля.",
         "Оригінальна деталь та аксесуари, що забезпечать надійну роботу авто.",
-        "Сучасне рішення для обслуговування транспортного засобу."
-    ])
-    benefit = random.choice([
+        "Сучасне рішення для обслуговування транспортного засобу від перевіреного бренду."
+    ]
+    benefit_options = [
         "Виріб виготовлено з міцних матеріалів, стійких до зносу.",
-        "Відповідає всім стандартам якості та технічним вимогам.",
+        "Відповідає всім заводским стандартам якості та технічним вимогам.",
         "Легко встановлюється та має тривалий термін експлуатації."
-    ])
-    delivery = random.choice([
+    ]
+    delivery_options = [
         "Швидка доставка Новою Поштою та Укрпоштою по всій Україні.",
-        "Відправка в день замовлення. Гарантія якості від постачальника."
-    ])
+        "Відправка в день замовлення. Гарантія якості від постачальника.",
+        "Надійне пакування перед відправленням для безпечного транспортування."
+    ]
     
-    clean_desc = str(raw_description).replace("<p>", "").replace("</p>", "").replace("<strong>", "").replace("</strong>", "").strip()
+    clean_desc = raw_description.replace("<p>", "").replace("</p>", "").replace("<strong>", "").replace("</strong>", "").strip()
     if not clean_desc or len(clean_desc) < 10:
-        clean_desc = f"Товар {clean_name} призначений для якісного обслуговування вашого авто."
+        clean_desc = f"Товар {clean_name} призначений для якісного обслуговування та покращення вашого авто."
 
     unique_description = (
-        f"<p><strong>{unique_name}</strong> — {intro}<br><br>"
+        f"<p><strong>{unique_name}</strong> — "
+        f"{random.choice(intro_options)}<br><br>"
         f"{clean_desc}<br><br>"
-        f"<strong>Основні переваги:</strong> {benefit}<br>"
-        f"<strong>Доставка:</strong> {delivery}</p>"
+        f"<strong>Основні переваги:</strong> {random.choice(benefit_options)}<br>"
+        f"<strong>Доставка:</strong> {random.choice(delivery_options)}</p>"
     )
     return unique_name, unique_description, keywords_str
 
-@app.route("/")
 @app.route("/prom-feed")
 def generate_feed():
     try:
-        response = requests.get(CSV_URL, timeout=30)
+        # Додаємо заголовки, щоб сервер постачальника думав, що це звичайний браузер
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(CSV_URL, headers=headers, timeout=30)
         response.raise_for_status()
         
         response.encoding = 'utf-8-sig'
-        raw_text = response.text.strip()
+        lines = response.text.splitlines()
         
-        # Автоматическое определение разделителя (точка с запятой или запятая)
-        delimiter = ";" if raw_text.count(";") > raw_text.count(",") else ","
-        
-        lines = raw_text.splitlines()
         if not lines:
-            return Response("Помилка: Порожній файл від постачальника", mimetype="text/plain", status=400)
-            
-        reader = csv.reader(lines, delimiter=delimiter)
-        headers = [h.strip().lower().replace("\ufeff", "") for h in next(reader)]
-        
-        # Индексы колонок (поиск по ключевым словам)
-        id_idx, name_idx, price_idx, desc_idx, avail_idx = -1, -1, -1, -1, -1
-        
-        for i, h in enumerate(headers):
-            if h in ["id", "id товара", "код", "артикул", "код_товара"]: id_idx = i
-            elif h in ["name", "название", "найменування", "назва", "товар"]: name_idx = i
-            elif h in ["price", "цена", "ціна", "price_opt"]: price_idx = i
-            elif h in ["description", "описание", "опис"]: desc_idx = i
-            elif h in ["available", "наличие", "наявність", "status"]: avail_idx = i
+            return Response("Помилка: файл постачальника порожній", status=400, mimetype="text/plain")
 
-        # Если по именам не нашлось, берем жесткие дефолтные позиции (1-я колонка ID, 2-я Название, 3-я Цена)
-        if id_idx == -1: id_idx = 0
-        if name_idx == -1: name_idx = 1 if len(headers) > 1 else 0
-        if price_idx == -1: price_idx = 2 if len(headers) > 2 else 0
+        # Автоматичне визначення розділювача за першим рядком
+        first_line = lines[0]
+        delimiter = ";" if ";" in first_line else ","
+
+        reader = csv.DictReader(lines, delimiter=delimiter)
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
         yml_catalog = ET.Element("yml_catalog", date=current_time)
@@ -115,14 +104,24 @@ def generate_feed():
         offers = ET.SubElement(shop, "offers")
 
         for row in reader:
-            if not row or len(row) <= max(id_idx, name_idx, price_idx):
-                continue
-                
-            product_id = str(row[id_idx]).strip()
-            if not product_id or product_id.lower() in ["id", "код", "артикул"]:
+            row_clean = {str(k).strip().lower(): v for k, v in row.items() if k is not None}
+
+            product_id = (
+                row_clean.get("id") or 
+                row_clean.get("id товара") or 
+                row_clean.get("код") or 
+                row_clean.get("артикул") or 
+                row_clean.get("код_товара")
+            )
+            if not product_id:
                 continue
 
-            raw_price = row[price_idx]
+            raw_price = (
+                row_clean.get("price") or 
+                row_clean.get("цена") or 
+                row_clean.get("ціна") or 
+                "0"
+            )
             try:
                 price_opt = float(str(raw_price).replace(",", ".").strip())
             except ValueError:
@@ -134,11 +133,11 @@ def generate_feed():
             margin_percent = calculate_margin(price_opt)
             price_retail = round(price_opt * (1 + margin_percent), 2)
 
-            raw_avail = row[avail_idx] if (avail_idx != -1 and avail_idx < len(row)) else "true"
-            is_available = "true" if str(raw_avail).lower() in ["true", "1", "yes", "в наявності", "есть", "в наличии", ""] else "false"
+            raw_avail = row_clean.get("available") or row_clean.get("наличие") or row_clean.get("наявність") or "true"
+            is_available = "true" if str(raw_avail).lower() in ["true", "1", "yes", "в наявності", "есть", "в наличии"] else "false"
 
-            raw_name = row[name_idx] if name_idx < len(row) else "Автотовар"
-            raw_desc = row[desc_idx] if (desc_idx != -1 and desc_idx < len(row)) else ""
+            raw_name = row_clean.get("name") or row_clean.get("название") or row_clean.get("найменування") or row_clean.get("назва") or "Автотовар"
+            raw_desc = row_clean.get("description") or row_clean.get("описание") or row_clean.get("опис") or ""
 
             u_name, u_desc, u_keywords = unique_product_data(raw_name, product_id, raw_desc)
 
