@@ -6,7 +6,7 @@ from flask import Flask, Response
 
 app = Flask(__name__)
 
-CSV_URL = "https://ag-opt.com.ua"
+CSV_URL = "https://drive.google.com/file/d/1Fnxfh6gsHI9tC15q_uPt3Wg1RaO33T20/view?usp=sharing"
 
 def calculate_markup(base_price):
     try:
