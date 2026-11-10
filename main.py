@@ -68,20 +68,26 @@ def unique_product_data(name, product_id, raw_description):
 @app.route("/prom-feed")
 def generate_feed():
     try:
-        # Додаємо заголовки, щоб сервер постачальника думав, що це звичайний браузер
+        # Створюємо сесію та додаємо розширені браузерні заголовки
+        session = requests.Session()
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1"
         }
-        response = requests.get(CSV_URL, headers=headers, timeout=30)
+        
+        response = session.get(CSV_URL, headers=headers, timeout=30)
         response.raise_for_status()
         
         response.encoding = 'utf-8-sig'
         lines = response.text.splitlines()
         
-        if not lines:
-            return Response("Помилка: файл постачальника порожній", status=400, mimetype="text/plain")
+        if not lines or len(lines) < 2:
+            return Response('<?xml version="1.0" encoding="UTF-8"?><yml_catalog><shop><notes>Помилка: Постачальник віддав порожній файл або заблокував запит</notes></shop></yml_catalog>', mimetype="text/xml")
 
-        # Автоматичне визначення розділювача за першим рядком
+        # Визначаємо розділювач автоматично
         first_line = lines[0]
         delimiter = ";" if ";" in first_line else ","
 
