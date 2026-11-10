@@ -1,4 +1,3 @@
-import csv
 import xml.etree.ElementTree as ET
 import random
 import requests
@@ -7,15 +6,15 @@ from flask import Flask, Response
 
 app = Flask(__name__)
 
-# ПОВНЕ ПОСИЛАННЯ З ВАШИМИ ТОКЕНАМИ ТА КЛЮЧАМИ
-CSV_URL = "https://ag-opt.com.ua"
+# Ссылка на нового XML-поставщика (UADRON)
+XML_URL = "https://uadron.com/products_feed.xml?hash_tag=281dd6d99f9dd4625d3c5e6ffe15f88d&sales_notes=&product_ids=&label_ids=&exclude_fields=&html_description=0&yandex_cpa=&process_presence_sure=&languages=uk%2Cru&extra_fields=quantityInStock&group_ids=109739798%2C138629015%2C153923291&nested_group_ids=109739798%2C138629015%2C153923291"
 
-# Набори слів для автоматичної унікалізації назв і текстів
-PREFIXES = ["Купити", "Якісний", "Надійний", "Оригінальний", "Професійний", "Автомобільний"]
-ADJECTIVES = ["для авто", "високої якості", "в машину", "преміум класу", "для ремонту"]
+# Базы синонимов для автоматической уникализации контента
+PREFIXES = ["Купити", "Якісний", "Надійний", "Оригінальний", "Професійний", "Інноваційний"]
+ADJECTIVES = ["для авто", "високої якості", "преміум класу", "для майстерень", "перевірений"]
 
 def calculate_margin(price_opt):
-    """Розрахунок роздрібної ціни за вашою сіткою націнок."""
+    """Расчет розничной цены по вашей сетке наценок."""
     if price_opt <= 100: return 1.00
     elif price_opt <= 250: return 0.80
     elif price_opt <= 500: return 0.60
@@ -29,40 +28,40 @@ def calculate_margin(price_opt):
     else: return 0.15
 
 def unique_product_data(name, product_id, raw_description):
-    """Генерація унікальних назв, описів та тегів пошуку."""
+    """Генерация уникальных заголовков, описаний и ключевых слов."""
     clean_name = name.strip()
     
-    # 1. Створення унікального тайтлу
+    # 1. Изменение названия
     prefix = random.choice(PREFIXES)
     adj = random.choice(ADJECTIVES)
     unique_name = f"{prefix} {clean_name} {adj} (Арт. {product_id})"
     
-    # 2. Ключові слова для пошуку всередині Prom
-    words = [w.lower().strip(",.?!()\"") for w in clean_name.split() if len(w) > 3]
-    base_keywords = [clean_name.lower(), "автотовари", "запчастини", "аксесуари для auto"]
+    # 2. Ключевые слова для поисковой оптимизации внутри Пром
+    words = [w.lower().strip(",.?!()\"'") for w in clean_name.split() if len(w) > 3]
+    base_keywords = [clean_name.lower(), "автотовари", "запчастини", "аксесуари"]
     base_keywords.extend(words)
     keywords_str = ", ".join(list(dict.fromkeys(base_keywords))[:15])
     
-    # 3. Рандомізована модель опису товару
+    # 3. Шаблонизатор для уникального описания
     intro_options = [
-        "Пропонуємо вашій увазі якісну позицію для вашого автомобіля.",
-        "Оригінальна деталь та аксесуари, що забезпечать надійну роботу авто.",
-        "Сучасне рішення для обслуговування транспортного засобу від перевіреного бренду."
+        "Пропонуємо вашій увазі якісну позицію для вашого автомобіля чи обладнання.",
+        "Оригінальний товар, що забезпечить надійну роботу вашої техніки.",
+        "Сучасне та надійне рішення від перевіреного бренду за вигідною ціною."
     ]
     benefit_options = [
-        "Виріб виготовлено з міцних матеріалів, стійких до зносу.",
-        "Відповідає всім заводским стандартам якості та технічним вимогам.",
-        "Легко встановлюється та має тривалий термін експлуатації."
+        "Виріб виготовлено з міцних та зносостійких матеріалів.",
+        "Повністю відповідає заводським стандартам якості та технічним нормам.",
+        "Має тривалий термін експлуатації та легко встановлюється."
     ]
     delivery_options = [
         "Швидка доставка Новою Поштою та Укрпоштою по всій Україні.",
-        "Відправка в день замовлення. Гарантія якості від постачальника.",
-        "Надійне пакування перед відправленням для безпечного транспортування."
+        "Відправка в день замовлення. Офіційна гарантія якості від виробника.",
+        "Надійне пакування товару перед відправленням для безпечного транспортування."
     ]
     
-    clean_desc = raw_description.replace("<p>", "").replace("</p>", "").replace("<strong>", "").replace("</strong>", "").strip()
+    clean_desc = (raw_description or "").replace("<p>", "").replace("</p>", "").replace("<strong>", "").replace("</strong>", "").strip()
     if not clean_desc or len(clean_desc) < 10:
-        clean_desc = f"Товар {clean_name} призначений для якісного обслуговування та покращення вашого авто."
+        clean_desc = f"Товар {clean_name} створений для професійного використання та обслуговування."
 
     unique_description = (
         f"<p><strong>{unique_name}</strong> — "
@@ -78,84 +77,100 @@ def unique_product_data(name, product_id, raw_description):
 @app.route("/<path:path>")
 def generate_feed(path):
     try:
-        # Емуляція браузера Chrome для обходу блокувань постачальника
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        response = requests.get(CSV_URL, headers=headers, timeout=30)
+        # Скачиваем оригинальный XML от uadron
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(XML_URL, headers=headers, timeout=30)
         response.raise_for_status()
         
-        response.encoding = 'utf-8-sig'
-        lines = response.text.splitlines()
+        # Парсим полученное дерево XML
+        root_src = ET.fromstring(response.content)
         
-        if not lines:
-            return Response("Помилка: Файл постачальника порожній", status=400, mimetype="text/plain")
-
-        # Автоматичне визначення розділювача за першим рядком
-        delimiter = ";" if ";" in lines[0] else ","
-        reader = csv.reader(lines, delimiter=delimiter)
-        
-        # Пропускаємо перший рядок із заголовками колонок
-        next(reader, None)
-
-        # Базовий каркас XML каталогу
+        # Создаем основу нового XML-каталога
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
         yml_catalog = ET.Element("yml_catalog", date=current_time)
         shop = ET.SubElement(yml_catalog, "shop")
-
+        
+        # Копируем базовую информацию (можно переименовать под себя)
         ET.SubElement(shop, "name").text = "Автомагазин"
         ET.SubElement(shop, "company").text = "Дропшипінг Компанія"
         ET.SubElement(shop, "url").text = "https://prom.ua"
-
+        
+        # Валюта
         currencies = ET.SubElement(shop, "currencies")
         ET.SubElement(currencies, "currency", id="UAH", rate="1")
+        
+        # Копируем оригинальные категории
+        categories_new = ET.SubElement(shop, "categories")
+        categories_src = root_src.find(".//categories")
+        if categories_src is not None:
+            for cat in categories_src.findall("category"):
+                cat_id = cat.get("id")
+                parent_id = cat.get("parentId")
+                attribs = {"id": cat_id}
+                if parent_id:
+                    attribs["parentId"] = parent_id
+                ET.SubElement(categories_new, "category", **attribs).text = cat.text
+        else:
+            ET.SubElement(categories_new, "category", id="7090").text = "Автотовари"
 
-        categories = ET.SubElement(shop, "categories")
-        ET.SubElement(categories, "category", id="7090").text = "Автотовари"
-
-        offers = ET.SubElement(shop, "offers")
-
-        for row in reader:
-            if not row or len(row) < 3:
-                continue
-
-            # Читання даних за порядковими номерами колонок (0 - ID, 1 - назва, 2 - ціна, 3 - опис)
-            product_id = row[0].strip()
-            raw_name = row[1].strip() if len(row) > 1 else "Автотовар"
-            raw_price = row[2].strip() if len(row) > 2 else "0"
-            raw_desc = row[3].strip() if len(row) > 3 else ""
-
-            if not product_id:
-                continue
-
+        offers_new = ET.SubElement(shop, "offers")
+        
+        # Ищем все товары в исходном файле
+        offers_src = root_src.findall(".//offer")
+        for offer in offers_src:
+            product_id = offer.get("id")
+            available = offer.get("available", "true")
+            
+            # Извлекаем оригинальное имя, описание и цену
+            name_el = offer.find("name")
+            price_el = offer.find("price")
+            desc_el = offer.find("description")
+            cat_id_el = offer.find("categoryId")
+            
+            raw_name = name_el.text if name_el is not None else "Автотовар"
+            raw_desc = desc_el.text if desc_el is not None else ""
+            cat_id = cat_id_el.text if cat_id_el is not None else "7090"
+            
             try:
-                price_opt = float(raw_price.replace(",", ".").strip())
-            except ValueError:
+                price_opt = float(price_el.text.strip()) if price_el is not None else 0.0
+            except (ValueError, AttributeError):
                 price_opt = 0.0
-
+                
             if price_opt <= 0:
                 continue
-
-            # Обчислення ціни з вашою націнкою
-            margin_percent = calculate_margin(price_opt)
-            price_retail = round(price_opt * (1 + margin_percent), 2)
-
-            # Генерація унікальних даних
+                
+            # Считаем новую цену с наценкой
+            margin = calculate_margin(price_opt)
+            price_retail = round(price_opt * (1 + margin), 2)
+            
+            # Уникализируем данные
             u_name, u_desc, u_keywords = unique_product_data(raw_name, product_id, raw_desc)
-
-            # Формування елемента товару
-            offer = ET.SubElement(offers, "offer", id=str(product_id), available="true")
-            ET.SubElement(offer, "name").text = u_name
-            ET.SubElement(offer, "price").text = str(price_retail)
-            ET.SubElement(offer, "currencyId").text = "UAH"
-            ET.SubElement(offer, "categoryId").text = "7090"
-            ET.SubElement(offer, "description").text = f"<![CDATA[{u_desc}]]>"
-            ET.SubElement(offer, "keywords").text = u_keywords
+            
+            # Формируем новый элемент товара
+            new_offer = ET.SubElement(offers_new, "offer", id=str(product_id), available=available)
+            ET.SubElement(new_offer, "name").text = u_name
+            ET.SubElement(new_offer, "price").text = str(price_retail)
+            ET.SubElement(new_offer, "currencyId").text = "UAH"
+            ET.SubElement(new_offer, "categoryId").text = str(cat_id)
+            ET.SubElement(new_offer, "description").text = f"<![CDATA[{u_desc}]]>"
+            ET.SubElement(new_offer, "keywords").text = u_keywords
+            
+            # Копируем картинки, если они есть
+            for img in offer.findall("picture"):
+                if img.text:
+                    ET.SubElement(new_offer, "picture").text = img.text
+                    
+            # Копируем параметры/характеристики, если они есть
+            for param in offer.findall("param"):
+                attribs = {"name": param.get("name")}
+                if param.get("unit"):
+                    attribs["unit"] = param.get("unit")
+                ET.SubElement(new_offer, "param", **attribs).text = param.text
 
         xml_string = ET.tostring(yml_catalog, encoding="utf-8", method="xml")
         xml_declaration = b'<?xml version="1.0" encoding="UTF-8"?>\n'
-
+        
         return Response(xml_declaration + xml_string, mimetype="text/xml")
-
+        
     except Exception as e:
-        return Response(f"Помилка сервера: {str(e)}", status=500, mimetype="text/plain")
+        return Response(f"Помилка генерації XML: {str(e)}", status=500, mimetype="text/plain")
